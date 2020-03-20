@@ -1,21 +1,35 @@
-package Broadcaster
+package main
 
 import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
+	"os"
 	"time"
 )
 
 var server Server
+var headers = []string{"HTTP/1.1 200 OK\n",
+	"Date: Tue, 14 Dec 2010 10:48:45 GMT\n",
+	"Server: GoLang\n",
+	"Content-Type: text/html; charset=iso-8859-1\n",
+	"Content-Length: 4\n", "Machine-Reached-Status: true\n"}
 
+type Response struct {
+	Status               string
+	Date                 time.Time
+	ContentType          string
+	ContentLength        int16
+	MachineReachedStatus bool
+}
 type Server struct {
 	Address net.UDPAddr
 	Key     string
 	port    int16
 }
 type Request struct {
-	Action    int8
+	Action    int16
 	Key       string
 	Id        int32
 	SongBytes []byte
@@ -68,48 +82,65 @@ func sendOff(request Request) {
 	CheckforErrors(err)
 }
 
-func beginBroadcasting(conn net.UDPConn, stop chan bool) chan bool {
-	deadline := time.Now().Add(6 * time.Second)
+func beginBroadcasting(stop chan bool) chan bool {
+	deadline := time.Now().Add(5 * time.Minute)
+	address := net.UDPAddr{IP: net.ParseIP("localhost"), Port: 4447}
+	c, err := net.ListenUDP("udp", &address)
+	CheckforErrors(err)
 	for time.Now().Before(deadline) {
 		bytes := make([]byte, 2048)
 		time.Sleep(1500 * time.Microsecond)
 		//attempting local contact...
-		_, address, err := conn.ReadFromUDP(bytes)
+		_, address, err := c.ReadFromUDP(bytes)
 		var request Request
-		err = json.Unmarshal(bytes, request)
-		CheckforErrors(err)
-		proceed := checkAddress(*address)
+		proceed := checkAddress(address)
 		if proceed {
 			deadline = time.Now().Add(6 * time.Second)
 			sendOff(request)
+			err = json.Unmarshal(bytes, request)
+			CheckforErrors(err)
 		}
 	}
 	stop <- true
 	return stop
 }
+
+func localRequest() {
+
+}
 func startServer() {
-	conn, err := net.ListenUDP("udp", &server.Address)
-	if err != nil {
-		fmt.Println("err")
-	}
+
 	ch := make(chan bool)
+	listen, _ := net.Listen("tcp", ":4444")
 	for {
-		CheckforErrors(err)
+		fmt.Println("Waiting to make contact")
 		bytes := make([]byte, 2048)
 		time.Sleep(2 * time.Second)
 		//attempting local contact...
-		_, address, err := conn.ReadFromUDP(bytes)
+		conn, err := listen.Accept()
+
 		var request Request
+		_, err = conn.Read(bytes)
+		CheckforErrors(err)
+		fmt.Println(string(bytes))
 		err = json.Unmarshal(bytes, request)
 		CheckforErrors(err)
 		//connection set between vibin and localhost
-		proceed := checkAddress(*address)
+		proceed := checkAddress(conn.LocalAddr())
 		if proceed {
 			switch request.Action {
 			case 1001: //begin first connection
+				confirmreach(conn, ch) //todo finish function please
+				x := <-ch
+				if x {
+					ch <- false
+					break
+				}
+				_ = listen.Close()
+				os.Exit(1)
 				server.port, server.Key = contactRemoteServer()
-				beginBroadcasting(*conn, ch)
-				<-ch
+				_ = conn.Close()
+				beginBroadcasting(ch)
 				fmt.Println("restarting")
 				//begin listening for
 				ch <- false
@@ -120,13 +151,43 @@ func startServer() {
 		}
 	}
 }
-func checkAddress(address net.UDPAddr) bool {
-	name, err := net.LookupAddr(address.IP.String())
+func confirmreach(conn net.Conn, c chan bool) {
+	fmt.Println("Machine Reached...")
+
+	var bytes []byte
+	bytes, _ = json.Marshal(headers)
+	_, err := conn.Write(bytes)
+	if err != nil {
+		c <- true
+	}
+	//todo update UI
+}
+
+func checkAddress(address net.Addr) bool {
+	// will compare strings
+	name, err := net.LookupAddr(address.String())
 	fmt.Println(name, err)
 	return true
 }
+func handleFirstConnection(w http.ResponseWriter, r *http.Request) {
+	_ = r.ParseForm()
+	bytes, err := json.Marshal(Response{Status: "200", Date: time.Now(), ContentLength: 4, ContentType: "text/html; charset=iso-8859-1\n", MachineReachedStatus: true})
+	w.Header().Set("Access-Control-Allow-Origin", "*") //todo replace when out of testing
+	_, err = w.Write(bytes)
+	if err != nil {
+		panic(err)
+	}
+}
+func handleSongBytes(w http.ResponseWriter, r *http.Request) {
+}
+func startWebServer() {
+	fmt.Println("Preparing Web Server")
+	http.HandleFunc("/establish", handleFirstConnection)
+	http.HandleFunc("/songBytes", handleSongBytes)
+	_ = http.ListenAndServe(":4447", nil)
+	fmt.Println("Web Server has started")
+}
 func main() {
-	address := net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 4447}
-	server = Server{Address: address}
-	startServer()
+	startWebServer()
+	//	startServer()
 }
