@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"os"
+	"strings"
 	"time"
 )
 
@@ -43,19 +43,20 @@ type Message struct {
 }
 
 func contactRemoteServer() (port int16, key string) {
-	conn, err := net.Dial("udp", "remotehost:port") //todo change address
+	fmt.Println("Contacting Remote Server")
+	conn, err := net.Dial("udp", "localhost:1000") //todo change address
 	CheckforErrors(err)
-	message := Request{Action: 1001, Key: "", Id: 2} //first time connection, port not needed
+	message := Request{Action: 2111, Key: "", Id: 2, SongBytes: make([]byte, 0)} //first time connection, port not needed
 	bytes, err := json.Marshal(message)
 	//send info off
-	_, err = conn.Write(bytes)
 	CheckforErrors(err)
-	address := net.UDPAddr{IP: net.ParseIP(""), Port: 2222}
+	address := net.UDPAddr{IP: net.ParseIP("localhost"), Port: 2222}
 	//listen for update on request
 	listener, err := net.ListenUDP("udp", &address)
 	CheckforErrors(err)
 	deadline := time.Now().Add(10 * time.Second)
-	bytes = make([]byte, 2048)
+	_, err = conn.Write(bytes)
+	defer conn.Close()
 	for time.Now().Before(deadline) {
 		time.Sleep(2 * time.Second)
 		_, _, err := listener.ReadFromUDP(bytes)
@@ -109,45 +110,18 @@ func localRequest() {
 
 }
 func startServer() {
-
 	ch := make(chan bool)
-	listen, _ := net.Listen("tcp", ":4444")
 	for {
-		fmt.Println("Waiting to make contact")
-		bytes := make([]byte, 2048)
-		time.Sleep(2 * time.Second)
-		//attempting local contact...
-		conn, err := listen.Accept()
-
 		var request Request
-		_, err = conn.Read(bytes)
-		CheckforErrors(err)
-		fmt.Println(string(bytes))
-		err = json.Unmarshal(bytes, request)
-		CheckforErrors(err)
-		//connection set between vibin and localhost
-		proceed := checkAddress(conn.LocalAddr())
-		if proceed {
-			switch request.Action {
-			case 1001: //begin first connection
-				confirmreach(conn, ch) //todo finish function please
-				x := <-ch
-				if x {
-					ch <- false
-					break
-				}
-				_ = listen.Close()
-				os.Exit(1)
-				server.port, server.Key = contactRemoteServer()
-				_ = conn.Close()
-				beginBroadcasting(ch)
-				fmt.Println("restarting")
-				//begin listening for
-				ch <- false
-				break
-			case 1002:
-				break
-			}
+		switch request.Action {
+		case 1001:
+			beginBroadcasting(ch)
+			fmt.Println("restarting")
+			//begin listening for
+			ch <- false
+			break
+		case 1002:
+			break
 		}
 	}
 }
@@ -170,13 +144,25 @@ func checkAddress(address net.Addr) bool {
 	return true
 }
 func handleFirstConnection(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("Parsing")
 	_ = r.ParseForm()
-	bytes, err := json.Marshal(Response{Status: "200", Date: time.Now(), ContentLength: 4, ContentType: "text/html; charset=iso-8859-1\n", MachineReachedStatus: true})
+	fmt.Println("Done Parsing")
 	w.Header().Set("Access-Control-Allow-Origin", "*") //todo replace when out of testing
-	_, err = w.Write(bytes)
-	if err != nil {
-		panic(err)
+	server.port, server.Key = contactRemoteServer()
+	if server.port == 0 || strings.Compare("", server.Key) == 0 {
+		bytes, err := json.Marshal(Response{Status: "4444", Date: time.Now(), ContentLength: 4, ContentType: "text/html; charset=iso-8859-1\n", MachineReachedStatus: false})
+		_, err = w.Write(bytes)
+		if err != nil {
+			panic(err)
+		}
+	} else {
+		bytes, err := json.Marshal(Response{Status: "200", Date: time.Now(), ContentLength: 4, ContentType: "text/html; charset=iso-8859-1\n", MachineReachedStatus: true})
+		_, err = w.Write(bytes)
+		if err != nil {
+			panic(err)
+		}
 	}
+
 }
 func handleSongBytes(w http.ResponseWriter, r *http.Request) {
 }

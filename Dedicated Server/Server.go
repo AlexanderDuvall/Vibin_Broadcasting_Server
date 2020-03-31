@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -14,12 +15,12 @@ var synchronize = sync.Mutex{}
 var wait = sync.WaitGroup{}
 var broadcasters = make(map[int32][]byte)
 var BroadcasterPorts = make([]bool, 20000, 20000)
-var ListenerPorts = make([]bool, 2000, 2000)
+var ListenerPorts = make([]bool, 1, 2000)
 var listenerOffset, broadcasterOffset = 1000, 3001
 
 type Message struct {
-	Action int8
-	Port   int32
+	Action int16
+	Port   int16
 	Error  int8
 	key    string
 }
@@ -56,22 +57,24 @@ func newBroadcaster(address net.UDPAddr, id int32, key string) {
 		port += broadcasterOffset
 		b.Address.Port = port
 		address := net.UDPAddr{IP: net.ParseIP("localhost"), Port: port}
+		//create listener for broadcaster
 		listener, err := net.ListenUDP("udp", &address)
 		if err != nil {
 			fmt.Println(err)
 		}
 		c := make(chan bool)
-		confirmBroadcasterConnection(&b, *listener, c)
+		confirmBroadcasterConnection(&b, c)
 		defer listener.Close()
 		proceed := <-c
 		if proceed {
-			err := listener.SetDeadline(time.Now().Add(5 * time.Second))
-			for {
+			deadline := time.Now().Add(5 * time.Second)
+			os.Exit(1)
+			for time.Now().Before(deadline) {
 				//keep listening for song updates every three seconds
 				if err != nil {
 					fmt.Println(err)
 				}
-				time.Sleep(2 * time.Second)
+				time.Sleep(1500 * time.Millisecond)
 				var bytes = make([]byte, 2048)
 				//read bytes....
 				_, err = listener.Read(bytes)
@@ -120,15 +123,16 @@ func createKey(length int8) string {
 /**
 Format Json Information and send it off to a new broadcaster
 */
-func confirmBroadcasterConnection(broadcaster *Broadcaster, conn net.UDPConn, c chan bool) chan bool {
+func confirmBroadcasterConnection(broadcaster *Broadcaster, c chan bool) chan bool {
 	a := createKey(20)
-	var message = Message{1111, int32(broadcaster.Address.Port), 0, a}
+	var message = Message{1111, int16(broadcaster.Address.Port), 0, a}
 	m, err2 := json.Marshal(message)
 	if err2 != nil {
 		fmt.Println("unsuccessful: ", err2)
 		c <- false
 	}
-	_, err := conn.WriteToUDP(m, &broadcaster.Address)
+	conn, err := net.Dial("udp", broadcaster.Address.String())
+	_, err = conn.Write(m)
 	if err != nil {
 		fmt.Println("unsuccessful: ", err)
 		c <- false
@@ -139,16 +143,19 @@ func confirmBroadcasterConnection(broadcaster *Broadcaster, conn net.UDPConn, c 
 func Prepare(conn net.UDPConn) {
 	var bytes = make([]byte, 2048)
 	//{4 digit code ,User_id,KeyIdentifier
-	_, _, err2 := conn.ReadFromUDP(bytes)
+	amt, address, err2 := conn.ReadFromUDP(bytes)
 	var request Request
-	if err := json.Unmarshal(bytes, request); err != nil || err2 != nil {
+	err := json.Unmarshal(bytes[:amt], &request)
+	fmt.Println(request)
+	if err != nil || err2 != nil {
 		fmt.Println(err)
+		fmt.Println(err2)
 	} else {
 		a := request.Action
 		switch a {
-		case 211: //create broadcaster
-			address := net.UDPAddr{IP: net.ParseIP("localhost")}
-			go newBroadcaster(address, request.id, request.key)
+		case 2111: //create broadcaster
+			fmt.Println("WE have some POWER")
+			go newBroadcaster(*address, request.id, request.key)
 			break
 		case 417: //send information
 			break
@@ -164,8 +171,15 @@ func startServer(server Server) {
 	if err != nil {
 		fmt.Println(err)
 	}
-	defer listener.Close()
+	fmt.Println("Starting Server....")
 	for {
+		/**	fmt.Println("looping")
+		bytes := make([]byte, 2048)
+		_, _, err := listener.ReadFromUDP(bytes)
+		fmt.Println(err)
+		fmt.Printf("Bytes %s", bytes)
+		*/
+		fmt.Println("Waiting...")
 		time.Sleep(50 * time.Microsecond)
 		Prepare(*listener)
 	}
@@ -188,8 +202,10 @@ func checkAndReservePorts() (found bool, port int) {
 	return
 }
 func main() {
-	for i := 0; i < len(ListenerPorts); i++ {
+	for i := 0; i <= len(ListenerPorts); i++ {
+		fmt.Println("ffff")
 		conn := net.UDPAddr{IP: net.ParseIP("aa"), Port: i + listenerOffset}
+		fmt.Println(conn.Port)
 		server := Server{Address: conn}
 		startServer(server)
 	}
