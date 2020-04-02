@@ -62,10 +62,11 @@ func newBroadcaster(address net.UDPAddr, id int32, key string) {
 		if err != nil {
 			fmt.Println(err)
 		}
-		c := make(chan bool)
-		confirmBroadcasterConnection(&b, c)
+		fmt.Println("confirming broadcaster conn...")
+
 		defer listener.Close()
-		proceed := <-c
+		proceed := confirmBroadcasterConnection(&b)
+		fmt.Println("confirmed")
 		if proceed {
 			deadline := time.Now().Add(5 * time.Second)
 			os.Exit(1)
@@ -109,6 +110,8 @@ func newBroadcaster(address net.UDPAddr, id int32, key string) {
 		} else {
 			fmt.Println("failure")
 		}
+	} else {
+		fmt.Println("Failure...aa")
 	}
 }
 func createKey(length int8) string {
@@ -123,27 +126,32 @@ func createKey(length int8) string {
 /**
 Format Json Information and send it off to a new broadcaster
 */
-func confirmBroadcasterConnection(broadcaster *Broadcaster, c chan bool) chan bool {
+func confirmBroadcasterConnection(broadcaster *Broadcaster) bool {
 	a := createKey(20)
 	var message = Message{1111, int16(broadcaster.Address.Port), 0, a}
 	m, err2 := json.Marshal(message)
 	if err2 != nil {
 		fmt.Println("unsuccessful: ", err2)
-		c <- false
+		return false
 	}
-	conn, err := net.Dial("udp", broadcaster.Address.String())
-	_, err = conn.Write(m)
+	fmt.Println(broadcaster.Address.String())
+	fmt.Println("dialing")
+	conn, err := net.Dial("udp", ":3001")
 	if err != nil {
 		fmt.Println("unsuccessful: ", err)
-		c <- false
+		return false
 	}
-	c <- true
-	return c
+	fmt.Println("sending..")
+	_, err = conn.Write(m)
+	fmt.Println("sent")
+	fmt.Println("ending")
+	return true
 }
 func Prepare(conn net.UDPConn) {
 	var bytes = make([]byte, 2048)
 	//{4 digit code ,User_id,KeyIdentifier
 	amt, address, err2 := conn.ReadFromUDP(bytes)
+	fmt.Println("address read from...", address.Port)
 	var request Request
 	err := json.Unmarshal(bytes[:amt], &request)
 	fmt.Println(request)
@@ -154,8 +162,8 @@ func Prepare(conn net.UDPConn) {
 		a := request.Action
 		switch a {
 		case 2111: //create broadcaster
-			fmt.Println("WE have some POWER")
-			go newBroadcaster(*address, request.id, request.key)
+			fmt.Println("creating new broadcaster")
+			newBroadcaster(*address, request.id, request.key)
 			break
 		case 417: //send information
 			break
@@ -185,8 +193,11 @@ func startServer(server Server) {
 	}
 }
 func checkAndReservePorts() (found bool, port int) {
+	fmt.Println("checking and reserving")
 	wait.Add(1)
 	synchronize.Lock()
+	defer synchronize.Unlock()
+	defer wait.Done()
 	found = false
 	port = -1
 	for i, v := range BroadcasterPorts {
@@ -197,8 +208,7 @@ func checkAndReservePorts() (found bool, port int) {
 			break
 		}
 	}
-	defer synchronize.Unlock()
-	defer wait.Done()
+
 	return
 }
 func main() {
