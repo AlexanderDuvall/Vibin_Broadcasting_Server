@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -173,24 +174,24 @@ func Prepare(conn net.UDPConn) {
 		}
 	}
 }
+func requestBroadcaster(w http.ResponseWriter, r *http.Request) {
+
+}
+func startWebServer(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/request", requestBroadcaster)
+}
 func startServer(server Server) {
 	address := net.UDPAddr{IP: server.Address.IP, Port: server.Address.Port}
 	listener, err := net.ListenUDP("udp", &address)
-	defer listener.Close()
 	if err != nil {
 		fmt.Println(err)
 	}
+	defer listener.Close()
 	fmt.Println("Starting Server....")
 	for {
-		/**	fmt.Println("looping")
-		bytes := make([]byte, 2048)
-		_, _, err := listener.ReadFromUDP(bytes)
-		fmt.Println(err)
-		fmt.Printf("Bytes %s", bytes)
-		*/
 		fmt.Println("Waiting...")
 		time.Sleep(50 * time.Microsecond)
-		Prepare(*listener)
+		go Prepare(*listener)
 	}
 }
 func checkAndReservePorts() (found bool, port int) {

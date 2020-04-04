@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -56,6 +57,7 @@ func contactRemoteServer() (port int16, key string) {
 	CheckforErrors(err)
 	deadline := time.Now().Add(10 * time.Second)
 	_, err = conn.Write(bytes)
+	defer listener.Close()
 	defer conn.Close()
 	for time.Now().Before(deadline) {
 		received := make([]byte, 1024)
@@ -67,12 +69,9 @@ func contactRemoteServer() (port int16, key string) {
 			fmt.Println(err)
 			continue
 		}
-		fmt.Println("received a byte")
 		var m Message
-		fmt.Println(received)
 		err2 := json.Unmarshal(received[:amt], &m)
-		fmt.Println(err2)
-		fmt.Println(m)
+		CheckforErrors(err2)
 		if m.Error == 0 {
 			if m.Action == 1111 {
 				//GOOD TO GO
@@ -157,23 +156,29 @@ func checkAddress(address net.Addr) bool {
 func handleFirstConnection(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("Parsing")
 	_ = r.ParseForm()
-	fmt.Println("Done Parsing")
+	action, _ := strconv.ParseInt(r.Form.Get("action"), 10, 16)
+	key := r.Form.Get("key")
 	w.Header().Set("Access-Control-Allow-Origin", "*") //todo replace when out of testing
-	server.port, server.Key = contactRemoteServer()
-	if server.port == 0 || strings.Compare("", server.Key) == 0 {
-		bytes, err := json.Marshal(Response{Status: "4444", Date: time.Now(), ContentLength: 4, ContentType: "text/html; charset=iso-8859-1\n", MachineReachedStatus: false})
-		_, err = w.Write(bytes)
-		if err != nil {
-			panic(err)
+	if action == 1001 && strings.Compare(key, "") != 0 && strings.Compare(strings.Split(r.RemoteAddr, ":")[0], "127.0.0.1") == 0 {
+		server.port, server.Key = contactRemoteServer()
+		if server.port == 0 || strings.Compare("", server.Key) == 0 {
+			bytes, err := json.Marshal(Response{Status: "4444", Date: time.Now(), ContentLength: 4, ContentType: "text/html; charset=iso-8859-1\n", MachineReachedStatus: false})
+			_, err = w.Write(bytes)
+			if err != nil {
+				panic(err)
+			}
+		} else {
+			bytes, err := json.Marshal(Response{Status: "200", Date: time.Now(), ContentLength: 4, ContentType: "text/html; charset=iso-8859-1\n", MachineReachedStatus: true})
+			_, err = w.Write(bytes)
+			if err != nil {
+				panic(err)
+			}
 		}
+	} else if strings.Compare(key, "") == 0 {
+		fmt.Println("Not a broadcaster... Sign up!")
 	} else {
-		bytes, err := json.Marshal(Response{Status: "200", Date: time.Now(), ContentLength: 4, ContentType: "text/html; charset=iso-8859-1\n", MachineReachedStatus: true})
-		_, err = w.Write(bytes)
-		if err != nil {
-			panic(err)
-		}
+		fmt.Println("Please change pw...")
 	}
-
 }
 func handleSongBytes(w http.ResponseWriter, r *http.Request) {
 }
