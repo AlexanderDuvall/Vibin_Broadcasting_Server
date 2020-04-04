@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -22,7 +21,7 @@ type Message struct {
 	Action int16
 	Port   int16
 	Error  int8
-	key    string
+	Key    string
 }
 type Server struct {
 	Address net.UDPAddr
@@ -56,6 +55,7 @@ func newBroadcaster(address net.UDPAddr, id int32, key string) {
 		broadcasters[b.id] = nil
 		port += broadcasterOffset
 		b.Address.Port = port
+		fmt.Println("....port: ", port)
 		address := net.UDPAddr{IP: net.ParseIP("localhost"), Port: port}
 		//create listener for broadcaster
 		listener, err := net.ListenUDP("udp", &address)
@@ -69,7 +69,6 @@ func newBroadcaster(address net.UDPAddr, id int32, key string) {
 		fmt.Println("confirmed")
 		if proceed {
 			deadline := time.Now().Add(5 * time.Second)
-			os.Exit(1)
 			for time.Now().Before(deadline) {
 				//keep listening for song updates every three seconds
 				if err != nil {
@@ -134,14 +133,16 @@ func confirmBroadcasterConnection(broadcaster *Broadcaster) bool {
 		fmt.Println("unsuccessful: ", err2)
 		return false
 	}
+
 	fmt.Println(broadcaster.Address.String())
 	fmt.Println("dialing")
-	conn, err := net.Dial("udp", ":3001")
+	conn, err := net.Dial("udp", ":4411")
 	if err != nil {
 		fmt.Println("unsuccessful: ", err)
 		return false
 	}
 	fmt.Println("sending..")
+	fmt.Println(m)
 	_, err = conn.Write(m)
 	fmt.Println("sent")
 	fmt.Println("ending")

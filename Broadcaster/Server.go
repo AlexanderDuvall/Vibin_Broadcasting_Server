@@ -50,7 +50,7 @@ func contactRemoteServer() (port int16, key string) {
 	bytes, err := json.Marshal(message)
 	//send info off
 	CheckforErrors(err)
-	address := net.UDPAddr{IP: net.ParseIP("localhost"), Port: 2222}
+	address := net.UDPAddr{IP: net.ParseIP("localhost"), Port: 4411}
 	//listen for update on request
 	listener, err := net.ListenUDP("udp", &address)
 	CheckforErrors(err)
@@ -58,16 +58,27 @@ func contactRemoteServer() (port int16, key string) {
 	_, err = conn.Write(bytes)
 	defer conn.Close()
 	for time.Now().Before(deadline) {
-		time.Sleep(2 * time.Second)
-		_, _, err := listener.ReadFromUDP(bytes)
-		CheckforErrors(err)
+		received := make([]byte, 1024)
+		//	time.Sleep(2 * time.Second)
+		_ = listener.SetDeadline(time.Now().Add(10 * time.Second))
+		amt, _, err := listener.ReadFromUDP(received)
+		//CheckforErrors(err)
+		if err != nil {
+			fmt.Println(err)
+			continue
+		}
+		fmt.Println("received a byte")
 		var m Message
-		_ = json.Unmarshal(bytes, m)
+		fmt.Println(received)
+		err2 := json.Unmarshal(received[:amt], &m)
+		fmt.Println(err2)
+		fmt.Println(m)
 		if m.Error == 0 {
 			if m.Action == 1111 {
 				//GOOD TO GO
 				port = m.Port
 				key = m.Key
+				fmt.Printf("values: %v, %s\n", key, port)
 				return
 			}
 		}
