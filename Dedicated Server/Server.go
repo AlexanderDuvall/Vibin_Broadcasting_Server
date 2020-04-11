@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -48,7 +49,71 @@ func (b Broadcaster) validate() (exists bool) {
 	//mysql function to determine validity---assume true for now
 	return
 }
+func newBroadcasterWeb(w http.ResponseWriter, id int32, key string) {
+	var b Broadcaster
+	b = Broadcaster{Key: key, id: id}
+	if found, port := checkAndReservePorts(); b.validate() && found {
+		broadcasters[b.id] = nil
+		port += broadcasterOffset
+		fmt.Println("....port: ", port)
+		address := net.UDPAddr{IP: net.ParseIP("localhost"), Port: port} //todo change to non-local later
+		b.Address = address
+		//create listener for broadcaster
+		listener, err := net.ListenUDP("udp", &address)
+		if err != nil {
+			fmt.Println(err)
+		}
+		fmt.Println("confirming broadcaster conn...")
+		//defer listener.Close()
+		proceed := confirmBroadcasterConnectionWeb(w, &b)
+		fmt.Println("confirmed")
+		if proceed {
+			deadline := time.Now().Add(4 * time.Minute)
+			err := listener.SetDeadline(time.Now().Add(4 * time.Minute))
+			for time.Now().Before(deadline) {
+				//keep listening for song updates every 1.5 seconds
+				time.Sleep(1500 * time.Millisecond)
+				var bytes = make([]byte, 2048)
+				//read bytes....
+				_, err = listener.Read(bytes)
+				if err != nil && strings.Compare(err.Error(), "EOF") != 0 {
+					fmt.Println(err)
+					continue
+				} else if len(bytes) != 0 {
+					var request Request
+					err = json.Unmarshal(bytes, request)
+					if err != nil {
+						fmt.Println(err)
+					}
+					//authenticate user
+					if b.authenticate(request.key) {
+						err := listener.SetDeadline(time.Now().Add(5 * time.Second))
+						if err != nil {
+							fmt.Println(err)
+						}
+						deadline = time.Now().Add(5 * time.Second)
+						//proceed
+						wait.Add(1)
+						synchronize.Lock()
+						//lock broadcaster key at Id
+						broadcasters[b.id] = request.songBytes
+						synchronize.Unlock()
+						wait.Done()
+					} else {
+						fmt.Println("More than one entity attempted to access data...")
+						break
+					}
+				}
+			}
+		} else {
+			fmt.Println("failure")
+		}
+	} else {
+		fmt.Println("Failure...aa")
+	}
+}
 
+//Deprecated
 func newBroadcaster(address net.UDPAddr, id int32, key string) {
 	var b Broadcaster
 	b = Broadcaster{Address: address, Key: key, id: id}
@@ -114,6 +179,14 @@ func newBroadcaster(address net.UDPAddr, id int32, key string) {
 		fmt.Println("Failure...aa")
 	}
 }
+func (b Broadcaster) authenticate(key string) bool {
+	if strings.Compare(b.Key, key) == 0 {
+		return true
+	} else {
+		fmt.Println("More than one entity attempted to access data...")
+		return false
+	}
+}
 func createKey(length int8) string {
 	letter := []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
 	b := make([]rune, length)
@@ -126,6 +199,25 @@ func createKey(length int8) string {
 /**
 Format Json Information and send it off to a new broadcaster
 */
+func confirmBroadcasterConnectionWeb(w http.ResponseWriter, broadcaster *Broadcaster) bool {
+	a := createKey(20)
+	var message = Message{1111, int16(broadcaster.Address.Port), 0, a}
+	m, err2 := json.Marshal(message)
+	if err2 != nil {
+		fmt.Println("unsuccessful: ", err2)
+		return false
+	}
+	fmt.Println(broadcaster.Address.String())
+	fmt.Println("dialing")
+	fmt.Println("sending..")
+	fmt.Println(m)
+	_, _ = w.Write(m)
+	fmt.Println("sent")
+	fmt.Println("ending")
+	return true
+}
+
+//Deprecated
 func confirmBroadcasterConnection(broadcaster *Broadcaster) bool {
 	a := createKey(20)
 	var message = Message{1111, int16(broadcaster.Address.Port), 0, a}
@@ -149,6 +241,29 @@ func confirmBroadcasterConnection(broadcaster *Broadcaster) bool {
 	fmt.Println("ending")
 	return true
 }
+func prepareWeb(w http.ResponseWriter, r *http.Request) {
+	var action uint64
+	var id int64
+	id, err := strconv.ParseInt(r.Form.Get("id"), 10, 32)
+	action, err2 := strconv.ParseUint(r.Form.Get("Action"), 10, 64)
+	request := Request{Action: uint16(action), key: r.Form.Get("key"), id: int32(id)} //unmarshal
+	if err != nil || err2 != nil {
+		fmt.Println(err)
+		fmt.Println(err2)
+	} else {
+		a := request.Action
+		switch a {
+		case 2111: //create broadcaster
+			fmt.Println("creating new broadcaster")
+			newBroadcasterWeb(w, request.id, request.key)
+			break
+		default:
+			break
+		}
+	}
+}
+
+//Deprecated
 func Prepare(conn net.UDPConn) {
 	var bytes = make([]byte, 2048)
 	//{4 digit code ,User_id,KeyIdentifier
@@ -175,11 +290,17 @@ func Prepare(conn net.UDPConn) {
 	}
 }
 func requestBroadcaster(w http.ResponseWriter, r *http.Request) {
+	_ = r.ParseForm()
+	go prepareWeb(w, r)
+}
 
-}
-func startWebServer(w http.ResponseWriter, r *http.Request) {
+/**@deprecated**/
+func startWebServer() {
 	http.HandleFunc("/request", requestBroadcaster)
+	_ = http.ListenAndServe(":1000", nil)
 }
+
+//Deprecated
 func startServer(server Server) {
 	address := net.UDPAddr{IP: server.Address.IP, Port: server.Address.Port}
 	listener, err := net.ListenUDP("udp", &address)
@@ -189,7 +310,7 @@ func startServer(server Server) {
 	defer listener.Close()
 	fmt.Println("Starting Server....")
 	for {
-		fmt.Println("Waiting...")
+		//	fmt.Println("Waiting...")
 		time.Sleep(50 * time.Microsecond)
 		go Prepare(*listener)
 	}
@@ -214,11 +335,6 @@ func checkAndReservePorts() (found bool, port int) {
 	return
 }
 func main() {
-	for i := 0; i <= len(ListenerPorts); i++ {
-		fmt.Println("ffff")
-		conn := net.UDPAddr{IP: net.ParseIP("aa"), Port: i + listenerOffset}
-		fmt.Println(conn.Port)
-		server := Server{Address: conn}
-		startServer(server)
-	}
+	fmt.Println("Beginning dedicated web server!")
+	startWebServer()
 }

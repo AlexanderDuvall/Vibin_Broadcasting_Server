@@ -137,7 +137,6 @@ func startServer() {
 }
 func confirmreach(conn net.Conn, c chan bool) {
 	fmt.Println("Machine Reached...")
-
 	var bytes []byte
 	bytes, _ = json.Marshal(headers)
 	_, err := conn.Write(bytes)
@@ -146,7 +145,6 @@ func confirmreach(conn net.Conn, c chan bool) {
 	}
 	//todo update UI
 }
-
 func checkAddress(address net.Addr) bool {
 	// will compare strings
 	name, err := net.LookupAddr(address.String())
@@ -183,7 +181,7 @@ func handleFirstConnection(w http.ResponseWriter, r *http.Request) {
 func handleSongBytes(w http.ResponseWriter, r *http.Request) {
 }
 func startWebServer() {
-	fmt.Println("Preparing Web Server")
+	fmt.Println("Preparing broadcaster local server")
 	http.HandleFunc("/establish", handleFirstConnection)
 	http.HandleFunc("/songBytes", handleSongBytes)
 	_ = http.ListenAndServe(":4447", nil)
